@@ -1,0 +1,3 @@
+usuario: professortoniati
+email: professor.toniati@gmail.com
+repositorio: https://github.com/professortoniati/atg2619-lista-tarefas.git
