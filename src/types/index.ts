@@ -13,6 +13,15 @@ export interface Task {
   completedAt?: string;
   createdAt: string;
   updatedAt: string;
+  userId?: string;
+}
+
+export interface UserProfile {
+  id: string;
+  email: string;
+  name: string;
+  avatarUrl?: string;
+  createdAt?: string;
 }
 
 export type FilterStatus = 'todas' | 'pendentes' | 'concluidas';

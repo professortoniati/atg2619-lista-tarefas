@@ -5,9 +5,10 @@ import {
   CalendarDays, 
   LogOut,
   Database,
-  RefreshCw
+  RefreshCw,
+  User as UserIcon
 } from 'lucide-react';
-import type { NavigationTab } from '../types';
+import type { NavigationTab, UserProfile } from '../types';
 
 interface NavbarProps {
   currentTab: NavigationTab;
@@ -17,6 +18,7 @@ interface NavbarProps {
   isSyncing?: boolean;
   onSync?: () => void;
   isOnline?: boolean;
+  userProfile?: UserProfile | null;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -27,7 +29,23 @@ export const Navbar: React.FC<NavbarProps> = ({
   isSyncing = false,
   onSync,
   isOnline = true,
+  userProfile,
 }) => {
+  // Obter iniciais do usuário
+  const getInitials = (name?: string, email?: string) => {
+    if (name && name.trim()) {
+      const parts = name.trim().split(' ');
+      if (parts.length >= 2) {
+        return (parts[0][0] + parts[1][0]).toUpperCase();
+      }
+      return name.slice(0, 2).toUpperCase();
+    }
+    if (email) {
+      return email.slice(0, 2).toUpperCase();
+    }
+    return 'US';
+  };
+
   return (
     <header className="sticky top-0 z-30 bg-white/80 backdrop-blur-md border-b border-slate-200/80 transition-all">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -53,11 +71,11 @@ export const Navbar: React.FC<NavbarProps> = ({
                   title={isOnline ? 'Conectado ao Supabase (lista-tarefas)' : 'Modo Offline / LocalStorage'}
                 >
                   <Database className="w-2.5 h-2.5" />
-                  <span className="font-semibold">{isOnline ? 'Supabase: lista-tarefas' : 'Offline'}</span>
+                  <span className="font-semibold">{isOnline ? 'Supabase' : 'Offline'}</span>
                   <span className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
                 </div>
               </div>
-              <p className="text-[11px] text-slate-600 font-medium hidden sm:block">Gestão Ágil & Produtividade na Nuvem</p>
+              <p className="text-[11px] text-slate-500 font-medium hidden sm:block">Gestão Ágil & Produtividade na Nuvem</p>
             </div>
           </div>
 
@@ -111,36 +129,38 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
           </nav>
 
-          {/* Right Action: Sync, User & Logout */}
+          {/* Right Action: Sync, User Profile & Logout */}
           <div className="flex items-center gap-2">
             {onSync && (
               <button
                 onClick={onSync}
                 disabled={isSyncing}
-                className="p-2 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg border border-slate-200 hover:border-blue-200 transition-all"
+                className="p-2 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg border border-slate-200 hover:border-blue-200 transition-all cursor-pointer"
                 title="Sincronizar com Supabase"
               >
                 <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin text-blue-600' : ''}`} />
               </button>
             )}
 
-            <div className="hidden md:flex items-center gap-2 pr-2 border-r border-slate-200">
-              <div className="w-8 h-8 rounded-full bg-slate-200 border border-slate-300 flex items-center justify-center font-bold text-xs text-slate-700">
-                LT
+            {/* Logged User Info */}
+            <div className="flex items-center gap-2.5 pl-1 pr-2 py-1 bg-slate-50 border border-slate-200/80 rounded-xl">
+              <div className="w-7 h-7 rounded-lg bg-gradient-to-tr from-blue-600 to-indigo-600 text-white flex items-center justify-center font-bold text-xs shadow-sm shadow-blue-500/20">
+                {userProfile ? getInitials(userProfile.name, userProfile.email) : <UserIcon className="w-3.5 h-3.5" />}
               </div>
-              <div className="text-left">
-                <p className="text-xs font-semibold text-slate-800 leading-tight">Leandro Toniati</p>
-                <p className="text-[10px] text-emerald-600 font-medium flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block"></span>
-                  Online
+              <div className="text-left hidden md:block max-w-[140px]">
+                <p className="text-xs font-bold text-slate-800 truncate leading-tight">
+                  {userProfile?.name || userProfile?.email?.split('@')[0] || 'Usuário'}
+                </p>
+                <p className="text-[10px] text-slate-400 truncate leading-tight">
+                  {userProfile?.email || 'Autenticado'}
                 </p>
               </div>
             </div>
 
             <button
               onClick={onOpenLogout}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-rose-600 hover:text-rose-700 hover:bg-rose-50 rounded-lg border border-transparent hover:border-rose-200 transition-all"
-              title="Sair do aplicativo"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-rose-600 hover:text-rose-700 hover:bg-rose-50 rounded-xl border border-transparent hover:border-rose-200 transition-all cursor-pointer"
+              title="Sair da conta"
             >
               <LogOut className="w-4 h-4" />
               <span className="hidden sm:inline">Sair</span>
@@ -152,4 +172,3 @@ export const Navbar: React.FC<NavbarProps> = ({
     </header>
   );
 };
-

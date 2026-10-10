@@ -14,12 +14,14 @@ interface DbTask {
   completed_at: string | null;
   created_at: string;
   updated_at: string;
+  user_id?: string | null;
 }
 
 interface DbCategory {
   id: string;
   name: string;
   created_at: string;
+  user_id?: string | null;
 }
 
 function mapDbToTask(db: DbTask): Task {
@@ -44,9 +46,9 @@ function mapDbToTask(db: DbTask): Task {
     completedAt: db.completed_at || undefined,
     createdAt: db.created_at,
     updatedAt: db.updated_at,
+    userId: db.user_id || undefined,
   };
 }
-
 
 function generateUuid(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -68,10 +70,19 @@ class TaskService {
     }
 
     try {
-      const { data, error } = await supabase
+      const { data: userData } = await supabase.auth.getUser();
+      const currentUserId = userData.user?.id;
+
+      let query = supabase
         .from('tasks')
         .select('*')
         .order('created_at', { ascending: false });
+
+      if (currentUserId) {
+        query = query.eq('user_id', currentUserId);
+      }
+
+      const { data, error } = await query;
 
       if (error) {
         console.warn('Supabase getTasks error, usando localStorage:', error.message);
@@ -81,15 +92,23 @@ class TaskService {
 
       this.isOnline = true;
 
-      // Se o banco estiver vazio pela primeira vez, popula com tarefas iniciais
-      if (!data || data.length === 0) {
-        const localTasks = storageService.getTasks();
-        const initialToSeed = localTasks.length > 0 ? localTasks : INITIAL_TASKS;
-        await this.seedInitialTasks(initialToSeed);
-        return { tasks: initialToSeed, source: 'supabase' };
+      // Se o usuário estiver autenticado e não tiver nenhuma tarefa, podemos criar as tarefas iniciais para ele
+      if ((!data || data.length === 0) && currentUserId) {
+        await this.seedInitialTasksForUser(currentUserId, INITIAL_TASKS);
+        const seeded = await supabase
+          .from('tasks')
+          .select('*')
+          .eq('user_id', currentUserId)
+          .order('created_at', { ascending: false });
+
+        if (seeded.data && seeded.data.length > 0) {
+          const tasks = seeded.data.map((item) => mapDbToTask(item as DbTask));
+          storageService.saveTasks(tasks);
+          return { tasks, source: 'supabase' };
+        }
       }
 
-      const tasks = data.map((item) => mapDbToTask(item as DbTask));
+      const tasks = (data || []).map((item) => mapDbToTask(item as DbTask));
       storageService.saveTasks(tasks); // Mantém cache local atualizado
       return { tasks, source: 'supabase' };
     } catch (err) {
@@ -112,6 +131,9 @@ class TaskService {
 
     if (isSupabaseConfigured) {
       try {
+        const { data: userData } = await supabase.auth.getUser();
+        const currentUserId = userData.user?.id || null;
+
         const dbPayload: Partial<DbTask> = {
           id: newId,
           title: taskData.title,
@@ -123,6 +145,7 @@ class TaskService {
           completed_at: taskData.completedAt || null,
           created_at: nowIso,
           updated_at: nowIso,
+          user_id: currentUserId,
         };
 
         const { data, error } = await supabase
@@ -244,9 +267,10 @@ class TaskService {
 
     if (isSupabaseConfigured) {
       try {
+        const { data: userData } = await supabase.auth.getUser();
         await supabase
           .from('categories')
-          .upsert([{ name: trimmed }], { onConflict: 'name' });
+          .upsert([{ name: trimmed, user_id: userData.user?.id || null }], { onConflict: 'name' });
       } catch (err) {
         console.error('Erro ao salvar categoria no Supabase:', err);
       }
@@ -258,8 +282,12 @@ class TaskService {
   public async resetData(): Promise<Task[]> {
     if (isSupabaseConfigured) {
       try {
-        await supabase.from('tasks').delete().neq('id', '___non_existent___');
-        await this.seedInitialTasks(INITIAL_TASKS);
+        const { data: userData } = await supabase.auth.getUser();
+        const currentUserId = userData.user?.id;
+        if (currentUserId) {
+          await supabase.from('tasks').delete().eq('user_id', currentUserId);
+          await this.seedInitialTasksForUser(currentUserId, INITIAL_TASKS);
+        }
       } catch (err) {
         console.error('Erro ao resetar dados no Supabase:', err);
       }
@@ -268,7 +296,7 @@ class TaskService {
     return storageService.resetToDefault();
   }
 
-  private async seedInitialTasks(tasks: Task[]): Promise<void> {
+  private async seedInitialTasksForUser(userId: string, tasks: Task[]): Promise<void> {
     try {
       const isUuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
       const rows = tasks.map((t) => ({
@@ -282,6 +310,7 @@ class TaskService {
         completed_at: t.completedAt || null,
         created_at: t.createdAt || new Date().toISOString(),
         updated_at: t.updatedAt || new Date().toISOString(),
+        user_id: userId,
       }));
 
       await supabase.from('tasks').upsert(rows, { onConflict: 'id' });

@@ -6,9 +6,12 @@ import type {
   FilterStatus, 
   SortOption, 
   NavigationTab, 
-  ToastMessage 
+  ToastMessage,
+  UserProfile
 } from './types';
+import type { User } from '@supabase/supabase-js';
 import { taskService } from './services/taskService';
+import { authService } from './services/authService';
 import { Navbar } from './components/Navbar';
 import { TasksView } from './components/TasksView';
 import { AnalyticsView } from './components/AnalyticsView';
@@ -17,9 +20,16 @@ import { TaskFormModal } from './components/TaskFormModal';
 import { ConfirmModal } from './components/ConfirmModal';
 import { LogoutModal } from './components/LogoutModal';
 import { ToastContainer } from './components/ToastContainer';
-import { CheckSquare, LogIn, Loader2, Database } from 'lucide-react';
+import { AuthPage } from './components/Auth/AuthPage';
+import { Loader2 } from 'lucide-react';
 
 export function App() {
+  // Auth state
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [isAuthChecking, setIsAuthChecking] = useState(true);
+
+  // App data state
   const [tasks, setTasks] = useState<Task[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [currentTab, setCurrentTab] = useState<NavigationTab>('tarefas');
@@ -39,7 +49,6 @@ export function App() {
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [taskToDeleteId, setTaskToDeleteId] = useState<string | null>(null);
   const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
-  const [isLoggedOut, setIsLoggedOut] = useState(false);
 
   // Toasts
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
@@ -56,7 +65,15 @@ export function App() {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
-  // Carrega dados iniciais do Supabase
+  // Carrega perfil do usuário
+  const loadProfile = useCallback(async (userId: string) => {
+    const profile = await authService.getUserProfile(userId);
+    if (profile) {
+      setUserProfile(profile);
+    }
+  }, []);
+
+  // Carrega dados de tarefas e categorias
   const loadData = useCallback(async (showToast = false) => {
     try {
       setIsSyncing(true);
@@ -71,7 +88,7 @@ export function App() {
 
       if (showToast) {
         if (taskResult.source === 'supabase') {
-          addToast('Dados sincronizados com o Supabase!', 'success');
+          addToast('Tarefas sincronizadas com o Supabase!', 'success');
         } else {
           addToast('Carregado do cache local (offline).', 'info');
         }
@@ -79,16 +96,42 @@ export function App() {
     } catch (err) {
       console.error('Erro ao carregar dados:', err);
       setIsOnline(false);
-      addToast('Não foi possível conectar ao Supabase. Modo offline ativado.', 'warning');
+      addToast('Não foi possível conectar ao Supabase.', 'warning');
     } finally {
       setIsLoading(false);
       setIsSyncing(false);
     }
   }, [addToast]);
 
+  // Observer de autenticação do Supabase
   useEffect(() => {
-    loadData(false);
-  }, [loadData]);
+    authService.getSession().then(async (session) => {
+      if (session?.user) {
+        setCurrentUser(session.user);
+        await loadProfile(session.user.id);
+        await loadData(false);
+      }
+      setIsAuthChecking(false);
+    });
+
+    const { data: { subscription } } = authService.onAuthStateChange(async (event, session) => {
+      if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') {
+        if (session?.user) {
+          setCurrentUser(session.user);
+          await loadProfile(session.user.id);
+          await loadData(false);
+        }
+      } else if (event === 'SIGNED_OUT') {
+        setCurrentUser(null);
+        setUserProfile(null);
+        setTasks([]);
+      }
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [loadData, loadProfile]);
 
   // CRUD Handlers
   const handleSaveTask = async (taskData: {
@@ -203,48 +246,42 @@ export function App() {
     setTasks(reset);
     setIsLoading(false);
     setIsLogoutModalOpen(false);
-    addToast('Dados restaurados para o padrão no Supabase.', 'info');
+    addToast('Tarefas restauradas para o padrão no seu perfil.', 'info');
   };
 
-  const handleSimulateLogout = () => {
+  const handleLogout = async () => {
     setIsLogoutModalOpen(false);
-    setIsLoggedOut(true);
-    addToast('Sessão encerrada com segurança.', 'info');
+    await authService.signOut();
+    setCurrentUser(null);
+    setUserProfile(null);
+    setTasks([]);
+    addToast('Sessão encerrada com sucesso.', 'info');
   };
 
-  const pendingCount = tasks.filter((t) => !t.completed).length;
-
-  if (isLoggedOut) {
+  // Se estiver validando o token/sessão inicial
+  if (isAuthChecking) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-        <div className="max-w-md w-full bg-white rounded-3xl p-8 border border-slate-200/90 shadow-xl text-center space-y-5 animate-fade-in">
-          <div className="w-16 h-16 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center mx-auto shadow-md shadow-blue-500/10">
-            <CheckSquare className="w-8 h-8 stroke-[2.5]" />
-          </div>
-          <div>
-            <h1 className="text-2xl font-black text-slate-800">TaskPulse</h1>
-            <p className="text-sm text-slate-500 mt-1">Você encerrou a sessão com segurança.</p>
-          </div>
-          <div className="text-xs text-slate-600 bg-slate-50 p-4 rounded-2xl border border-slate-200 text-left space-y-2">
-            <p className="font-semibold text-slate-700 flex items-center gap-1.5">
-              <Database className="w-4 h-4 text-emerald-600" />
-              <span>Persistência em Nuvem:</span>
-            </p>
-            <p className="text-slate-500">
-              Suas tarefas estão sincronizadas diretamente no projeto <strong>lista-tarefas</strong> no Supabase.
-            </p>
-          </div>
-          <button
-            onClick={() => setIsLoggedOut(false)}
-            className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm rounded-xl shadow-lg shadow-blue-500/25 transition-all cursor-pointer"
-          >
-            <LogIn className="w-4 h-4" />
-            <span>Retornar ao Aplicativo</span>
-          </button>
-        </div>
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4">
+        <Loader2 className="w-10 h-10 text-blue-500 animate-spin mb-3" />
+        <p className="text-sm font-semibold text-slate-400">Verificando sessão com Supabase...</p>
       </div>
     );
   }
+
+  // Se não estiver logado, exibe tela de Autenticação
+  if (!currentUser) {
+    return (
+      <>
+        <AuthPage 
+          onSuccess={() => loadData(false)} 
+          onToast={addToast} 
+        />
+        <ToastContainer toasts={toasts} onRemoveToast={removeToast} />
+      </>
+    );
+  }
+
+  const pendingCount = tasks.filter((t) => !t.completed).length;
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col selection:bg-blue-500 selection:text-white">
@@ -258,6 +295,7 @@ export function App() {
         isSyncing={isSyncing}
         onSync={() => loadData(true)}
         isOnline={isOnline}
+        userProfile={userProfile}
       />
 
       {/* Main Container */}
@@ -265,7 +303,7 @@ export function App() {
         {isLoading ? (
           <div className="flex flex-col items-center justify-center py-20 space-y-4">
             <Loader2 className="w-10 h-10 text-blue-600 animate-spin" />
-            <p className="text-sm font-medium text-slate-500">Carregando tarefas do Supabase...</p>
+            <p className="text-sm font-medium text-slate-500">Carregando suas tarefas do Supabase...</p>
           </div>
         ) : (
           <>
@@ -316,15 +354,15 @@ export function App() {
       <footer className="border-t border-slate-200/80 bg-white/60 py-6 text-center text-xs text-slate-400">
         <div className="max-w-6xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
           <p className="flex items-center gap-1">
-            <span>TaskPulse • Lista de Tarefas</span>
+            <span>TaskPulse • Gestão de Tarefas</span>
             <span>—</span>
             <span className="text-emerald-600 font-semibold flex items-center gap-1">
               <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block animate-pulse"></span>
-              Supabase Ativo (lista-tarefas)
+              Perfil: {userProfile?.name || currentUser?.email}
             </span>
           </p>
           <p className="text-slate-500">
-            Conectado com PostgreSQL & MCP no projeto <span className="font-bold text-slate-700">lista-tarefas</span>
+            PostgreSQL & Supabase Auth • Projeto <span className="font-bold text-slate-700">lista-tarefas</span>
           </p>
         </div>
       </footer>
@@ -359,8 +397,9 @@ export function App() {
       <LogoutModal
         isOpen={isLogoutModalOpen}
         onClose={() => setIsLogoutModalOpen(false)}
-        onSimulateLogout={handleSimulateLogout}
+        onConfirmLogout={handleLogout}
         onResetData={handleResetData}
+        userName={userProfile?.name || currentUser?.email}
       />
 
       {/* Floating Toasts */}
